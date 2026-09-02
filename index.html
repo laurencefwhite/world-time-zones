@@ -273,12 +273,18 @@ canvas{position:absolute;inset:0;width:100%;height:100%;display:block;touch-acti
       <label class="tog"><input type="checkbox" id="L-co" checked><span class="sw"></span><span class="tl">Countries</span></label>
       <label class="tog"><input type="checkbox" id="L-night" checked><span class="sw"></span><span class="tl">Sun &amp; shadow</span></label>
       <label class="tog"><input type="checkbox" id="L-cities" checked><span class="sw"></span><span class="tl">Cities</span></label>
+      <label class="tog"><input type="checkbox" id="L-names" checked><span class="sw"></span><span class="tl">City names</span></label>
       <label class="tog"><input type="checkbox" id="L-labels" checked><span class="sw"></span><span class="tl">Zone offsets</span></label>
-      <label class="tog"><input type="checkbox" id="L-codes"><span class="sw"></span><span class="tl">Zone codes</span></label>
+      <label class="tog"><input type="checkbox" id="L-codes" checked><span class="sw"></span><span class="tl">Zone codes</span></label>
+      <label class="tog"><input type="checkbox" id="L-times" checked><span class="sw"></span><span class="tl">Local times</span></label>
       <label class="tog"><input type="checkbox" id="L-grat" checked><span class="sw"></span><span class="tl">Graticule</span></label>
       <label class="tog"><input type="checkbox" id="L-dst" checked><span class="sw"></span><span class="tl">Daylight saving</span></label>
-      <label class="tog"><input type="checkbox" id="L-wx"><span class="sw"></span><span class="tl">Weather on cities</span></label>
-      <label class="tog"><input type="checkbox" id="L-spin"><span class="sw"></span><span class="tl">Slow spin</span></label>
+      <label class="tog"><input type="checkbox" id="L-wx" checked><span class="sw"></span><span class="tl">Weather on cities</span></label>
+      <label class="tog"><input type="checkbox" id="L-fahr"><span class="sw"></span><span class="tl">Fahrenheit (°F)</span></label>
+      <label class="tog"><input type="checkbox" id="L-spin" checked><span class="sw"></span><span class="tl">Slow spin</span></label>
+    </div>
+    <div class="grp">
+      <button class="btn" id="resetview" title="Recentre and fit the globe">Reset View</button>
     </div>
   </div>
 
@@ -327,7 +333,6 @@ canvas{position:absolute;inset:0;width:100%;height:100%;display:block;touch-acti
     </div>
     <div class="sbtns">
       <button class="btn" id="reset" title="Back to the present moment">Now</button>
-      <button class="btn" id="resetview" title="Recentre and fit the globe">View</button>
     </div>
   </div>
 
@@ -696,7 +701,15 @@ function offsetLabel(z) {
 
 /* --------------------------------------------------------------- drawing */
 var FONT = "'Inter',-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif";
-var opt = { tz: true, co: true, night: true, cities: true, labels: true, codes: false, grat: true, dst: true, wx: false, spin: false };
+var opt = { tz: true, co: true, night: true, cities: true, names: true, labels: true, codes: true, times: true, grat: true, dst: true, wx: true, fahr: false, spin: true };
+
+/* Weather is fetched and cached in Celsius whatever the switch says, so
+   flipping C/F is instant and never costs another request. */
+function tempTxt(c, withUnit) {
+  if (c === null || c === undefined) return '';
+  var v = opt.fahr ? c * 9 / 5 + 32 : c;
+  return Math.round(v) + '°' + (withUnit ? (opt.fahr ? 'F' : 'C') : '');
+}
 var hoverCity = null, hoverZone = null, highlightZone = null;
 var interacting = false;
 var cityPts = [];
@@ -860,13 +873,24 @@ function drawZoneLabels(date) {
     ctx.fillStyle = colour;
     ctx.fillText(t, x, y);
   }
-  var gapX = 62, gapY = twoLine ? 34 : 26;
+  /* The clock line is the tallest thing in the stack, so the collision gap has
+     to grow with it or zones start writing over each other. */
+  var timeFont = '700 ' + (zoom > 2 ? 17 : 15) + 'px ' + FONT;
+  var gapX = 62, gapY = (twoLine ? 34 : 26) + (opt.times ? 18 : 0);
   for (var i = 0; i < tzFeat.length; i++) {
     var f = tzFeat[i];
     if (f.area < minArea) continue;
     var code = opt.codes ? zoneCode(f.tzid, date) : '';
-    if (!opt.labels && !code) continue;
+    if (!opt.labels && !code && !opt.times) continue;
     var text = opt.labels ? offsetLabel(zoneHours(f.tzid, date)) : '';
+    /* Built from the offset we already have rather than an Intl call per zone
+       per frame - see groupOffsets above for why that matters. */
+    var clock = '';
+    if (opt.times) {
+      var lt = new Date(date.getTime() + zoneMinutes(f.tzid, date) * 60000);
+      var lh = lt.getUTCHours(), lm = lt.getUTCMinutes();
+      clock = (lh < 10 ? '0' : '') + lh + ':' + (lm < 10 ? '0' : '') + lm;
+    }
     /* a zone tall enough to run off the top of the disc gets its label more than once */
     for (var a = 0; a < f.anch.length; a++) {
       var at = f.anch[a];
@@ -879,13 +903,19 @@ function drawZoneLabels(date) {
       }
       if (!ok) continue;
       placed.push(p);
-      if (text && code) {
-        stamp(text, p[0], p[1] - 7, big, 'rgba(255,255,255,.88)');
-        stamp(code, p[0], p[1] + 8, small, 'rgba(210,228,250,.80)');
-      } else if (text) {
-        stamp(text, p[0], p[1], big, 'rgba(255,255,255,.88)');
-      } else {
-        stamp(code, p[0], p[1], big, 'rgba(255,255,255,.84)');
+      /* Clock on top, then the offset, then the code - stacked and centred on
+         the anchor so any combination of the three switches stays balanced. */
+      var stack = [];
+      if (clock) stack.push([clock, timeFont, 'rgba(255,255,255,.95)', zoom > 2 ? 19 : 17]);
+      if (text) stack.push([text, big, 'rgba(255,255,255,.88)', 15]);
+      if (code) stack.push([code, small, 'rgba(210,228,250,.80)', 12]);
+      var totalH = 0, si;
+      for (si = 0; si < stack.length; si++) totalH += stack[si][3];
+      var yy = p[1] - totalH / 2;
+      for (si = 0; si < stack.length; si++) {
+        yy += stack[si][3] / 2;
+        stamp(stack[si][0], p[0], yy, stack[si][1], stack[si][2]);
+        yy += stack[si][3] / 2;
       }
     }
   }
@@ -932,6 +962,7 @@ function drawCities(sun, r) {
   if (interacting) return;
 
   labelledCities = [];
+  if (!opt.names) { if (opt.wx) scheduleWeather(); return; }
   ctx.font = '500 10.5px ' + FONT;
   ctx.textAlign = 'left';
   ctx.textBaseline = 'middle';
@@ -965,7 +996,7 @@ function drawCities(sun, r) {
       var wx = wxNear[wxKeyOf(cp.c)];
       if (wx && !wx.pending && wx.temp !== null && wx.temp !== undefined) {
         var glyph = (WMO[wx.code] || ['', ''])[0];
-        var line = glyph + ' ' + wx.temp + '°';
+        var line = glyph + ' ' + tempTxt(wx.temp, true);
         ctx.font = '500 10px ' + FONT;
         ctx.lineWidth = 3;
         ctx.strokeStyle = 'rgba(3,8,18,.75)';
@@ -1042,8 +1073,8 @@ function getWeather(city, cb) {
             '&timezone=UTC';
   fetch(url).then(function (r) { return r.json(); }).then(function (j) {
     var d = j && j.current ? {
-      temp: Math.round(j.current.temperature_2m),
-      feels: Math.round(j.current.apparent_temperature),
+      temp: j.current.temperature_2m,
+      feels: j.current.apparent_temperature,
       hum: j.current.relative_humidity_2m,
       wind: Math.round(j.current.wind_speed_10m),
       code: j.current.weather_code
@@ -1060,22 +1091,38 @@ function getWeather(city, cb) {
 var wxNear = {}, wxNearTimer = null, wxNearAsked = '';
 var labelledCities = [];
 
+/* How long a reading stands before it is worth asking again. Deliberately
+   long: the globe only needs roughly-now weather, and Open-Meteo is free. */
+var WX_TTL = 600000;                       /* 10 minutes a reading stands */
+var WX_MIN_GAP = 30000;                    /* and never two requests inside 30s */
+var wxLastFetch = 0;
+
 function scheduleWeather() {
-  clearTimeout(wxNearTimer);
-  if (!opt.wx) return;
-  wxNearTimer = setTimeout(fetchNearWeather, 600);
+  if (!opt.wx || wxNearTimer) return;
+  /* Do NOT clear a pending timer. drawCities() calls this on every frame, so
+     with the globe spinning (60fps) a clearTimeout/setTimeout pair here meant
+     the 600ms debounce was cancelled and restarted forever and the fetch never
+     ran at all - which is why weather vanished the moment spin was on. Letting
+     the first timer stand turns it into a throttle instead of a debounce. */
+  /* A spinning globe relabels different cities every frame, so without a floor
+     the "new city came into view" path alone fired several requests a minute.
+     Wait out the remainder of the gap instead - the newly-arrived cities are
+     simply picked up by the next batch. */
+  var wait = Math.max(600, WX_MIN_GAP - (Date.now() - wxLastFetch));
+  wxNearTimer = setTimeout(function () { wxNearTimer = null; fetchNearWeather(); }, wait);
 }
 function fetchNearWeather() {
   if (!opt.wx) return;
   var want = labelledCities.slice(0, 60);
   var need = want.filter(function (c) {
     var e = wxNear[wxKeyOf(c)];
-    return !e || (!e.pending && Date.now() - e.t > 900000);
+    return !e || (!e.pending && Date.now() - e.t > WX_TTL);
   });
   if (!need.length) return;
   var stamp = need.map(function (c) { return wxKeyOf(c); }).join('|');
   if (stamp === wxNearAsked) return;
   wxNearAsked = stamp;
+  wxLastFetch = Date.now();
   need.forEach(function (c) { wxNear[wxKeyOf(c)] = { pending: true }; });
   var url = 'https://api.open-meteo.com/v1/forecast?latitude=' + need.map(function (c) { return c.lat; }).join(',') +
             '&longitude=' + need.map(function (c) { return c.lon; }).join(',') +
@@ -1085,13 +1132,13 @@ function fetchNearWeather() {
     need.forEach(function (c, i) {
       var cur = arr[i] && arr[i].current;
       wxNear[wxKeyOf(c)] = cur
-        ? { t: Date.now(), temp: Math.round(cur.temperature_2m), code: cur.weather_code }
+        ? { t: Date.now(), temp: cur.temperature_2m, code: cur.weather_code }
         : { t: Date.now(), temp: null };
     });
     wxNearAsked = '';
     draw();
   }).catch(function () {
-    need.forEach(function (c) { wxNear[wxKeyOf(c)] = { t: Date.now() - 840000, temp: null }; });
+    need.forEach(function (c) { wxNear[wxKeyOf(c)] = { t: Date.now() - (WX_TTL - 60000), temp: null }; });
     wxNearAsked = '';
   });
 }
@@ -1151,8 +1198,8 @@ function showCityTip(cp, mx, my, force) {
 function weatherHtml(d) {
   var w = WMO[d.code] || ['○', ''];
   return '<span class="ic">' + w[0] + '</span>' +
-         '<span class="tmp">' + d.temp + '°C</span>' +
-         '<span>' + w[1] + ' &middot; feels ' + d.feels + '° &middot; ' + d.wind + ' km/h</span>';
+         '<span class="tmp">' + tempTxt(d.temp, true) + '</span>' +
+         '<span>' + w[1] + ' &middot; feels ' + tempTxt(d.feels, false) + ' &middot; ' + d.wind + ' km/h</span>';
 }
 
 function showZoneTip(f, country, mx, my) {
@@ -1274,7 +1321,11 @@ cv.addEventListener('pointerup', function (e) {
   spinV = [0, 0];
   if (e.pointerType === 'touch') { interacting = false; draw(); doHover(e.clientX, e.clientY); return; }
   var cp = cityAt(e.clientX, e.clientY);
-  if (cp) flyTo(cp.c.lon, cp.c.lat);
+  if (cp) { flyTo(cp.c.lon, cp.c.lat); return; }
+  /* A click on empty globe pauses the spin, and clicking again restarts it.
+     Only when the spin layer is on, and only for a click that was not a drag -
+     `wasMoved` has already returned above for those. */
+  if (opt.spin) { spinPaused = !spinPaused; hideTip(); }
 });
 cv.addEventListener('pointercancel', endPointer);
 cv.addEventListener('pointerleave', function (e) { endPointer(e); hideTip(); hoverCity = null; });
@@ -1350,26 +1401,37 @@ function resetView() {
 }
 
 /* --------------------------------------------------------------- controls */
-['tz', 'co', 'night', 'cities', 'labels', 'codes', 'grat', 'dst', 'wx', 'spin'].forEach(function (key) {
+['tz', 'co', 'night', 'cities', 'names', 'labels', 'codes', 'times', 'grat', 'dst', 'wx', 'fahr', 'spin'].forEach(function (key) {
   var el = document.getElementById('L-' + key);
   el.checked = opt[key];
   el.addEventListener('change', function () {
     opt[key] = el.checked;
+    /* Names hang off the markers, so asking for names turns the markers on
+       rather than silently doing nothing. */
+    if (key === 'names' && opt.names && !opt.cities) {
+      opt.cities = true; document.getElementById('L-cities').checked = true;
+    }
+    if (key === 'cities' && !opt.cities && opt.names) {
+      opt.names = false; document.getElementById('L-names').checked = false;
+    }
     if (key === 'dst') { buildLegend(); hideTip(); }
     if (key === 'wx') { if (opt.wx) scheduleWeather(); }
-    if (key === 'spin') { if (opt.spin) startSpin(); }
+    /* Switching spin back on always resumes: a click-pause should not survive
+       the toggle, or the globe would sit still with the switch reading "on". */
+    if (key === 'spin') { spinPaused = false; if (opt.spin) startSpin(); }
     draw();
   });
 });
 
-var spinRaf = null, spinLast = 0;
+var spinRaf = null, spinLast = 0, spinPaused = false;
 function startSpin() {
   cancelAnimationFrame(spinRaf);
   spinLast = performance.now();
   (function tick(t) {
     if (!opt.spin) { spinRaf = null; return; }
+    /* spinLast is advanced even while paused, so resuming does not jump */
     var dt = t - spinLast; spinLast = t;
-    if (!dragStart && !flying) { rotation[0] = (rotation[0] + dt * 0.0042) % 360; draw(); }
+    if (!dragStart && !flying && !spinPaused) { rotation[0] = (rotation[0] + dt * 0.0042) % 360; draw(); }
     spinRaf = requestAnimationFrame(tick);
   })(performance.now());
 }
@@ -1696,6 +1758,11 @@ updateScrubLabel();
   zoom = 0.86;
   draw();
   setTimeout(function () { flyTo(off * 15, 14, 1); }, 260);
+  /* Spin is on by default, and only the change handler used to start it, so
+     the toggle would have read "on" against a motionless globe. Safe to call
+     now rather than after the intro flight: startSpin's own loop skips while
+     `flying` or `dragStart` is set, so it idles until the flight lands. */
+  if (opt.spin) startSpin();
 })();
 
 })();

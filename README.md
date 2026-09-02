@@ -14,11 +14,18 @@ local time anywhere on Earth.
 - **Sunlight shading**, stepped at each twilight threshold — the sun 0°, 6°, 12° and 18° below the
   horizon, which is to say sunset, then civil, nautical and astronomical twilight. Cities are marked
   as being in daylight or darkness.
+- **The local time in every zone**, set large above that zone's UTC offset and its code — so you can
+  read the world's clocks at a glance rather than doing the arithmetic.
 - **A time scrubber.** Drag or press play to run the clock forward and watch the terminator sweep
   across the globe.
-- **Current weather** on cities — temperature, apparent temperature, humidity and wind.
-- **Layers you can switch on and off:** cities, country outlines, country codes, zone boundaries,
-  DST status, the graticule, labels, night shading, weather, and a slow spin.
+- **Current weather** on cities — temperature, apparent temperature, humidity and wind, in Celsius
+  or Fahrenheit.
+- **A slow spin**, on by default. **Click the globe to stop it, and click again to start it** — a
+  drag still spins it by hand, and clicking a city still flies to that city.
+- **Layers you can switch on and off:** time zones, countries, sun and shadow, city markers, city
+  names, zone offsets, zone codes, local times, the graticule, daylight saving, weather,
+  Fahrenheit, and the spin. City names imply the markers, so switching names on brings the markers
+  with them.
 - **Offset from UTC** shown in the legend.
 
 ## Running it
