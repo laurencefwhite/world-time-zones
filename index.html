@@ -1020,8 +1020,12 @@ function drawCities(sun, r) {
 
   var shown = [];
 
-  /* Whatever the zone layer claimed comes first. */
-  for (i = 0; i < zoneBoxes.length; i++) boxes.push(zoneBoxes[i]);
+  /* The zone layer's claim is a preference, not a veto. A label looks for a
+     spot clear of everything first, and only if it cannot find one does it
+     settle for a spot that overlaps the zone text - which is drawn at seventy
+     per cent, and underneath, precisely so that it can be written over.
+     Treating it as a veto lost Melbourne its name and reading whenever a clock
+     happened to land on the city. */
 
   ctx.font = '500 10.5px ' + FONT;
   ctx.textAlign = 'left';
@@ -1056,14 +1060,17 @@ function drawCities(sun, r) {
                  [cp.x - 7 - wpx, cp.y - 0.5],
                  [cp.x - wpx / 2, cp.y - 13],
                  [cp.x - wpx / 2, cp.y + 13]];
-    var tx = 0, ty = 0, box = null, sp;
-    for (sp = 0; sp < spots.length; sp++) {
-      var sx = spots[sp][0], sy = spots[sp][1];
-      if (sx < 8 || sx + wpx > W - 8 || sy < 12 || sy > H - 12) continue;
-      var nbox = [sx - 2, sy - 7, wpx + 4, 13];
-      if (!isHover && hits(boxes, nbox)) continue;
-      tx = sx; ty = sy; box = nbox;
-      break;
+    var tx = 0, ty = 0, box = null, sp, pass;
+    for (pass = 0; pass < 2 && !box; pass++) {
+      for (sp = 0; sp < spots.length; sp++) {
+        var sx = spots[sp][0], sy = spots[sp][1];
+        if (sx < 8 || sx + wpx > W - 8 || sy < 12 || sy > H - 12) continue;
+        var nbox = [sx - 2, sy - 7, wpx + 4, 13];
+        if (!isHover && hits(boxes, nbox)) continue;
+        if (pass === 0 && hits(zoneBoxes, nbox)) continue;   /* dodge the clock if there is room */
+        tx = sx; ty = sy; box = nbox;
+        break;
+      }
     }
     if (!box) continue;
     if (shown.length < WX_MAX) shown.push(cp.c);
@@ -1086,13 +1093,16 @@ function drawCities(sun, r) {
           : [[tx, ty, tx - 2, ty - 6],
              [tx, ty + 12.5, tx - 2, ty + 6.5],
              [cp.x - 7 - lw, ty, cp.x - 9 - lw, ty - 6]];
-        for (var q = 0; q < tries.length; q++) {
-          var t2 = tries[q];
-          if (t2[0] + lw > W - 6) continue;
-          var cand = [t2[2], t2[3], lw + 4, 12];
-          if (hits(boxes, cand)) continue;
-          line = txt; wbox = cand; lx = t2[0]; ly = t2[1];
-          break;
+        for (var qp = 0; qp < 2 && !line; qp++) {
+          for (var q = 0; q < tries.length; q++) {
+            var t2 = tries[q];
+            if (t2[0] + lw > W - 6) continue;
+            var cand = [t2[2], t2[3], lw + 4, 12];
+            if (hits(boxes, cand)) continue;
+            if (qp === 0 && hits(zoneBoxes, cand)) continue;
+            line = txt; wbox = cand; lx = t2[0]; ly = t2[1];
+            break;
+          }
         }
       }
     }
