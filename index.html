@@ -1023,19 +1023,17 @@ function drawCities(sun, r) {
   /* Whatever the zone layer claimed comes first. */
   for (i = 0; i < zoneBoxes.length; i++) boxes.push(zoneBoxes[i]);
 
-  /* Every marker is an obstacle, so a reading can never be written over a dot -
-     including dots belonging to cities that get no label of their own. */
-  if (opt.wx && opt.cities) {
-    for (i = 0; i < cityPts.length; i++) {
-      boxes.push([cityPts[i].x - 3.5, cityPts[i].y - 3.5, 7, 7]);
-    }
-  }
-
   ctx.font = '500 10.5px ' + FONT;
   ctx.textAlign = 'left';
   ctx.textBaseline = 'middle';
+  /* cityPts is in population order, so walking it in order and booking each
+     marker as we reach it means a city's name may cover the dot of somewhere
+     smaller, but never the dot of somewhere larger. Booking them all up front
+     made every dot outrank every name: Sydney, hemmed in by the markers along
+     its own coast, lost its label to towns a tenth its size. */
   for (i = 0; i < cityPts.length; i++) {
     var cp = cityPts[i];
+    if (opt.cities) boxes.push([cp.x - 3.5, cp.y - 3.5, 7, 7]);
     var isHover = hoverCity && hoverCity.c === cp.c;
     /* The two layers are independent: a name is earned by size at this zoom,
        a reading belongs to any marker in view. Switching one must never add or
@@ -1048,14 +1046,26 @@ function drawCities(sun, r) {
     var wantName = opt.names || isHover;
 
     ctx.font = '500 10.5px ' + FONT;
-    var tx = cp.x + 7, ty = cp.y - 0.5;
     var wpx = ctx.measureText(cp.c.name).width;
-    if (tx + wpx > W - 8) { tx = cp.x - 7 - wpx; if (tx < 8) continue; }
 
-    /* The name's slot is booked whether or not names are drawn, so switching
-       them does not move a single reading. */
-    var box = [tx - 2, ty - 7, wpx + 4, 13];
-    if (hits(boxes, box) && !isHover) continue;
+    /* Four places to stand, tried in turn. With only one, a single neighbouring
+       dot was enough to lose a city outright - Sydney fell to the marker beside
+       it while Melbourne, smaller and with clear ground, kept its name. Cities
+       are considered largest first, so the big ones choose before the small. */
+    var spots = [[cp.x + 7, cp.y - 0.5],
+                 [cp.x - 7 - wpx, cp.y - 0.5],
+                 [cp.x - wpx / 2, cp.y - 13],
+                 [cp.x - wpx / 2, cp.y + 13]];
+    var tx = 0, ty = 0, box = null, sp;
+    for (sp = 0; sp < spots.length; sp++) {
+      var sx = spots[sp][0], sy = spots[sp][1];
+      if (sx < 8 || sx + wpx > W - 8 || sy < 12 || sy > H - 12) continue;
+      var nbox = [sx - 2, sy - 7, wpx + 4, 13];
+      if (!isHover && hits(boxes, nbox)) continue;
+      tx = sx; ty = sy; box = nbox;
+      break;
+    }
+    if (!box) continue;
     if (shown.length < WX_MAX) shown.push(cp.c);
 
     /* Measured before the name books its space, so a city's own label never
