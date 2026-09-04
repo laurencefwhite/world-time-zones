@@ -279,7 +279,7 @@ canvas{position:absolute;inset:0;width:100%;height:100%;display:block;touch-acti
       <label class="tog"><input type="checkbox" id="L-times" checked><span class="sw"></span><span class="tl">Local times</span></label>
       <label class="tog"><input type="checkbox" id="L-grat" checked><span class="sw"></span><span class="tl">Graticule</span></label>
       <label class="tog"><input type="checkbox" id="L-dst" checked><span class="sw"></span><span class="tl">Daylight saving</span></label>
-      <label class="tog"><input type="checkbox" id="L-wx" checked><span class="sw"></span><span class="tl">Weather on cities</span></label>
+      <label class="tog"><input type="checkbox" id="L-wx" checked><span class="sw"></span><span class="tl">Weather</span></label>
       <label class="tog"><input type="checkbox" id="L-fahr"><span class="sw"></span><span class="tl">Fahrenheit (°F)</span></label>
       <label class="tog"><input type="checkbox" id="L-spin" checked><span class="sw"></span><span class="tl">Slow spin</span></label>
     </div>
@@ -853,7 +853,7 @@ function draw() {
   ctx.lineWidth = 1; ctx.strokeStyle = PALETTE.rim; ctx.stroke();
 
   if ((opt.labels || opt.codes) && !fast) drawZoneLabels(date);
-  if (opt.cities) drawCities(sun, r); else cityPts = [];
+  if (opt.cities || opt.wx) drawCities(sun, r); else cityPts = [];
 }
 
 function hits(boxes, box) {
@@ -954,6 +954,7 @@ function drawCities(sun, r) {
     var night = opt.night && el < 0;
     cityPts.push({ c: c, x: p[0], y: p[1], night: night, el: el });
 
+    if (!opt.cities) continue;               /* readings can stand on their own */
     ctx.globalAlpha = 0.30 + 0.70 * Math.min(1, edge * 3.2);
     if (night) {
       ctx.beginPath(); ctx.arc(p[0], p[1], rad * 3.4, 0, 2 * Math.PI);
@@ -976,7 +977,7 @@ function drawCities(sun, r) {
 
   /* Every marker is an obstacle, so a reading can never be written over a dot -
      including dots belonging to cities that get no label of their own. */
-  if (opt.wx) {
+  if (opt.wx && opt.cities) {
     for (i = 0; i < cityPts.length; i++) {
       boxes.push([cityPts[i].x - 3.5, cityPts[i].y - 3.5, 7, 7]);
     }
@@ -1148,10 +1149,37 @@ var WX_TTL = 600000;                       /* 10 minutes a reading stands */
 var WX_MAX = 260;                          /* cities asked about at once */
 var WX_BATCH = 100;                        /* and how many go in one request */
 var WX_MIN_GAP = 30000;                    /* and never two requests inside 30s */
-var wxLastFetch = 0;
+var WX_SOON = 700;                         /* except right after a zoom or a flight */
+var wxLastFetch = 0, wxTimerAt = 0;
+/* Bumped when the viewer deliberately changes what is on screen. Spin drift
+   does not bump it, so a spinning globe keeps the 30s floor while a zoom or a
+   fly-to is served at once - the floor was there to stop the drift firing
+   several requests a minute, not to make a deliberate move wait. */
+var wxViewEpoch = 0, wxFetchedEpoch = -1;
+
+/* How many cities on screen are still waiting for a reading. */
+function wxOutstanding() {
+  var n = 0, now = Date.now(), i, e;
+  for (i = 0; i < labelledCities.length && i < WX_MAX; i++) {
+    e = wxNear[wxKeyOf(labelledCities[i])];
+    if (!e || (!e.pending && now - e.t > WX_TTL)) n++;
+  }
+  return n;
+}
 
 function scheduleWeather() {
-  if (!opt.wx || wxNearTimer) return;
+  if (!opt.wx) return;
+  if (!wxOutstanding()) return;            /* nothing to ask about, so no timer */
+  var urgent = wxViewEpoch !== wxFetchedEpoch;
+  var wait = urgent ? WX_SOON : Math.max(WX_SOON, WX_MIN_GAP - (Date.now() - wxLastFetch));
+  var at = Date.now() + wait;
+  if (wxNearTimer) {
+    /* A pending timer is left alone unless this call wants to fire sooner,
+       which only a deliberate view change can do. */
+    if (at >= wxTimerAt - 250) return;
+    clearTimeout(wxNearTimer);
+  }
+  wxTimerAt = at;
   /* Do NOT clear a pending timer. drawCities() calls this on every frame, so
      with the globe spinning (60fps) a clearTimeout/setTimeout pair here meant
      the 600ms debounce was cancelled and restarted forever and the fetch never
@@ -1161,7 +1189,6 @@ function scheduleWeather() {
      the "new city came into view" path alone fired several requests a minute.
      Wait out the remainder of the gap instead - the newly-arrived cities are
      simply picked up by the next batch. */
-  var wait = Math.max(600, WX_MIN_GAP - (Date.now() - wxLastFetch));
   wxNearTimer = setTimeout(function () {
     wxNearTimer = null;
     /* Asking mid-flight fetches whatever happened to be on screen half way
@@ -1183,6 +1210,7 @@ function fetchNearWeather() {
   if (stamp === wxNearAsked) return;
   wxNearAsked = stamp;
   wxLastFetch = Date.now();
+  wxFetchedEpoch = wxViewEpoch;
   need.forEach(function (c) { wxNear[wxKeyOf(c)] = { pending: true }; });
   /* Open-Meteo takes a list of coordinates, so a screenful of cities is one or
      two requests rather than one per city. */
@@ -1348,6 +1376,7 @@ cv.addEventListener('pointermove', function (e) {
   if (ids.length === 2 && pinch) {
     var nd = dist2(pointers[ids[0]], pointers[ids[1]]);
     zoom = clamp(pinch.zoom * (nd / pinch.d), 0.82, 9);
+    wxViewEpoch++;
     markInteract(); draw();
     return;
   }
@@ -1400,6 +1429,7 @@ cv.addEventListener('wheel', function (e) {
   e.preventDefault();
   var f = Math.exp(-e.deltaY * (e.deltaMode === 1 ? 0.05 : 0.0016));
   zoom = clamp(zoom * f, 0.82, 9);
+  wxViewEpoch++;
   markInteract(); draw(); fadeHint();
 }, { passive: false });
 
@@ -1456,6 +1486,7 @@ function flyTo(lon, lat, targetZoom) {
     var e = u < 0.5 ? 4 * u * u * u : 1 - Math.pow(-2 * u + 2, 3) / 2;
     rotation = [from[0] + dl * e, from[1] + (to[1] - from[1]) * e, 0];
     zoom = z0 + (z1 - z0) * e;
+    if (u >= 1) wxViewEpoch++;
     draw();
     if (u < 1) flying = requestAnimationFrame(step); else flying = null;
   })(performance.now());
