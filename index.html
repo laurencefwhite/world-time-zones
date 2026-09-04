@@ -1018,6 +1018,8 @@ function drawCities(sun, r) {
 
   if (!opt.names && !opt.wx) return;
 
+  var shown = [];
+
   /* Whatever the zone layer claimed comes first. */
   for (i = 0; i < zoneBoxes.length; i++) boxes.push(zoneBoxes[i]);
 
@@ -1054,6 +1056,7 @@ function drawCities(sun, r) {
        them does not move a single reading. */
     var box = [tx - 2, ty - 7, wpx + 4, 13];
     if (hits(boxes, box) && !isHover) continue;
+    if (shown.length < WX_MAX) shown.push(cp.c);
 
     /* Measured before the name books its space, so a city's own label never
        blocks its own reading - a neighbour's, or a bigger city's, still does. */
@@ -1105,6 +1108,7 @@ function drawCities(sun, r) {
       ctx.fillText(line, lx, ly);
     }
   }
+  wxCand = shown;
   if (opt.wx) scheduleWeather();
 }
 
@@ -1225,7 +1229,7 @@ function wxCacheSave() {
    more often than that returns the same numbers. */
 var WX_TTL = 900000;                       /* 15 minutes a reading stands */
 var WX_STORE = 'wtz.weather.v1';           /* and survives a reload, per city */
-var WX_MAX = 200;                          /* cities asked about at once */
+var WX_MAX = 200;                          /* ceiling on one ask, rarely reached */
 var WX_BATCH = 100;                        /* and how many go in one request */
 var WX_MIN_GAP = 30000;                    /* and never two requests inside 30s */
 var WX_SOON = 700;                         /* except right after a zoom or a flight */
@@ -1236,29 +1240,13 @@ var wxLastFetch = 0, wxTimerAt = 0, wxBackoffUntil = 0;
    several requests a minute, not to make a deliberate move wait. */
 var wxViewEpoch = 0, wxFetchedEpoch = -1;
 
-/* The cities worth a reading: the ones that carry a name at this zoom, or
-   would if names were switched on,
-   anywhere on the globe, nearest the middle of the view first. Asking beyond
-   the horizon is what keeps a spinning globe supplied - one batch covers the
-   next turn instead of chasing it thirty seconds behind. Rebuilt at most once
-   a second; the dot products are cheap but not free. */
-var wxCandAt = 0, wxCand = [];
-function wxCandidates() {
-  var now = Date.now();
-  if (now - wxCandAt < 1000 && wxCand.length) return wxCand;
-  wxCandAt = now;
-  var v = unitv([-rotation[0], -rotation[1]]);
-  var labelMin = (W < 700 ? 1e6 : 5e5) / Math.pow(zoom, 1.6);
-  var list = [], i, c;
-  for (i = 0; i < cities.length; i++) {
-    c = cities[i];
-    if (!(c.pop >= labelMin || (c.rank === 2 && zoom >= 1.3) || (c.rank === 1 && zoom >= 1.8))) continue;
-    list.push([c.u[0] * v[0] + c.u[1] * v[1] + c.u[2] * v[2], c]);
-  }
-  list.sort(function (a, b) { return b[0] - a[0]; });
-  wxCand = list.slice(0, WX_MAX).map(function (r) { return r[1]; });
-  return wxCand;
-}
+/* The cities worth a reading are exactly the ones whose label the last frame
+   put on screen - nothing over the horizon, nothing too small for this zoom,
+   nothing crowded out by a neighbour. Zooming in brings new ones, and only
+   those are asked about; everything already held stays held for its quarter
+   hour. Filled by drawCities. */
+var wxCand = [];
+function wxCandidates() { return wxCand; }
 
 /* How many of those are still waiting for a reading. */
 function wxOutstanding() {
@@ -1272,13 +1260,21 @@ function wxOutstanding() {
 
 wxCacheLoad();
 
+var WX_SETTLE = 8;                         /* this many waiting counts as a real change */
+
 function scheduleWeather() {
   if (!opt.wx) return;
-  if (!wxOutstanding()) return;            /* nothing to ask about, so no timer */
+  var out = wxOutstanding();
+  if (!out) return;                        /* nothing to ask about, so no timer */
   var urgent = wxViewEpoch !== wxFetchedEpoch;
-  /* Nothing has ever been asked for, so there is nothing to be polite about. */
+  /* Three speeds. Nothing asked for yet, so there is nothing to be polite
+     about; a view the viewer chose, served at once; and a crowd of cities that
+     turned up on their own - the layout settling after a load, or the globe
+     drifting round - which waits a few seconds so they can be asked for
+     together. A straggler or two waits out the full floor. */
   var wait = !wxLastFetch ? 150
            : urgent ? WX_SOON
+           : out >= WX_SETTLE ? 5000
            : Math.max(WX_SOON, WX_MIN_GAP - (Date.now() - wxLastFetch));
   /* Open-Meteo answers 429 if pushed, so a refusal buys everyone a minute's
      quiet rather than a retry loop. */
@@ -1600,9 +1596,10 @@ function flyTo(lon, lat, targetZoom, quiet) {
     var e = u < 0.5 ? 4 * u * u * u : 1 - Math.pow(-2 * u + 2, 3) / 2;
     rotation = [from[0] + dl * e, from[1] + (to[1] - from[1]) * e, 0];
     zoom = z0 + (z1 - z0) * e;
-    /* The opening flight is not a view the viewer chose, and the batch that
-       fired as the page loaded already covers where it lands. */
-    if (u >= 1 && !quiet) wxViewEpoch++;
+    /* Landing counts as a new view: the batch that went out mid-flight was
+       chosen against a smaller, half-turned globe, so the settled view has
+       cities it never saw. Only the missing ones are asked for. */
+    if (u >= 1) wxViewEpoch++;
     draw();
     if (u < 1) flying = requestAnimationFrame(step); else flying = null;
   })(performance.now());
@@ -1991,7 +1988,7 @@ updateScrubLabel();
   rotation = [-off * 15 - 62, -46, 0];
   zoom = 0.86;
   draw();
-  setTimeout(function () { flyTo(off * 15, 14, 1, true); }, 260);
+  setTimeout(function () { flyTo(off * 15, 14, 1); }, 260);
   /* Spin is on by default, and only the change handler used to start it, so
      the toggle would have read "on" against a motionless globe. Safe to call
      now rather than after the intro flight: startSpin's own loop skips while
