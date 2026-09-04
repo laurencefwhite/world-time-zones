@@ -1141,11 +1141,45 @@ function getWeather(city, cb) {
 
 /* --------------------------------------- a temperature beside the big cities */
 var wxNear = {}, wxNearTimer = null, wxNearAsked = '';
+
+/* Readings are kept per city in the viewer's own browser. Nothing is shared
+   between visitors - each browser talks to Open-Meteo directly - so this only
+   saves the same person asking twice inside the quarter hour, which is most of
+   the traffic when a page is reloaded or reopened. */
+function wxCacheLoad() {
+  try {
+    var raw = window.localStorage.getItem(WX_STORE);
+    if (!raw) return;
+    var o = JSON.parse(raw), now = Date.now(), k, e, n = 0;
+    for (k in o) {
+      if (!Object.prototype.hasOwnProperty.call(o, k)) continue;
+      e = o[k];
+      if (e && typeof e.t === 'number' && now - e.t < WX_TTL) { wxNear[k] = e; n++; }
+    }
+  } catch (err) {}                        /* private windows and file:// may refuse */
+}
+var wxSaveTimer = null;
+function wxCacheSave() {
+  clearTimeout(wxSaveTimer);
+  wxSaveTimer = setTimeout(function () {
+    try {
+      var out = {}, now = Date.now(), k, e;
+      for (k in wxNear) {
+        if (!Object.prototype.hasOwnProperty.call(wxNear, k)) continue;
+        e = wxNear[k];
+        if (e && !e.pending && typeof e.t === 'number' && now - e.t < WX_TTL) out[k] = e;
+      }
+      window.localStorage.setItem(WX_STORE, JSON.stringify(out));
+    } catch (err) {}
+  }, 2000);
+}
 var labelledCities = [];
 
-/* How long a reading stands before it is worth asking again. Deliberately
-   long: the globe only needs roughly-now weather, and Open-Meteo is free. */
-var WX_TTL = 600000;                       /* 10 minutes a reading stands */
+/* How long a reading stands before it is worth asking again. Open-Meteo's
+   current conditions are themselves stamped in fifteen-minute steps, so asking
+   more often than that returns the same numbers. */
+var WX_TTL = 900000;                       /* 15 minutes a reading stands */
+var WX_STORE = 'wtz.weather.v1';           /* and survives a reload, per city */
 var WX_MAX = 260;                          /* cities asked about at once */
 var WX_BATCH = 100;                        /* and how many go in one request */
 var WX_MIN_GAP = 30000;                    /* and never two requests inside 30s */
@@ -1166,6 +1200,8 @@ function wxOutstanding() {
   }
   return n;
 }
+
+wxCacheLoad();
 
 function scheduleWeather() {
   if (!opt.wx) return;
@@ -1232,7 +1268,7 @@ function fetchNearWeather() {
     }).catch(function () {
       batch.forEach(function (c) { wxNear[wxKeyOf(c)] = { t: Date.now() - (WX_TTL - 60000), temp: null }; });
     }).then(function () {
-      if (--left === 0) { wxNearAsked = ''; draw(); }
+      if (--left === 0) { wxNearAsked = ''; wxCacheSave(); draw(); }
     });
   });
 }
