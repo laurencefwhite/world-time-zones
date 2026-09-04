@@ -856,6 +856,15 @@ function draw() {
   if (opt.cities) drawCities(sun, r); else cityPts = [];
 }
 
+function hits(boxes, box) {
+  for (var b = 0; b < boxes.length; b++) {
+    var o = boxes[b];
+    if (box[0] < o[0] + o[2] && box[0] + box[2] > o[0] &&
+        box[1] < o[1] + o[3] && box[1] + box[3] > o[1]) return true;
+  }
+  return false;
+}
+
 function drawZoneLabels(date) {
   var centre = [-rotation[0], -rotation[1]];
   var minArea = 0.024 / Math.max(1, zoom * zoom * 0.55);
@@ -937,6 +946,7 @@ function drawCities(sun, r) {
     if (dist > 1.5533) continue;                      /* ~89 degrees */
     p = projection([c.lon, c.lat]);
     if (!p) continue;
+    if (p[0] < -30 || p[0] > W + 30 || p[1] < -30 || p[1] > H + 30) continue;
     var edge = 1 - Math.min(1, dist / 1.5533);
     var rad = c.pop >= 1e7 ? 2.9 : c.pop >= 4e6 ? 2.4 : c.pop >= 1e6 ? 2.0 : (c.rank ? 1.8 : 1.6);
     rad *= (0.85 + 0.35 * Math.min(1, zoom / 3));
@@ -962,49 +972,90 @@ function drawCities(sun, r) {
   if (interacting) return;
 
   labelledCities = [];
-  if (!opt.names) { if (opt.wx) scheduleWeather(); return; }
+  if (!opt.names && !opt.wx) return;
+
+  /* Every marker is an obstacle, so a reading can never be written over a dot -
+     including dots belonging to cities that get no label of their own. */
+  if (opt.wx) {
+    for (i = 0; i < cityPts.length; i++) {
+      boxes.push([cityPts[i].x - 3.5, cityPts[i].y - 3.5, 7, 7]);
+    }
+  }
+
   ctx.font = '500 10.5px ' + FONT;
   ctx.textAlign = 'left';
   ctx.textBaseline = 'middle';
   for (i = 0; i < cityPts.length; i++) {
     var cp = cityPts[i];
     var isHover = hoverCity && hoverCity.c === cp.c;
-    var earns = cp.c.pop >= labelMin ||
+    /* With weather on, every city the viewport holds is a candidate; without it,
+       only the ones big enough to have earned a name at this zoom. */
+    var earns = opt.wx ||
+                cp.c.pop >= labelMin ||
                 (cp.c.rank === 2 && zoom >= 1.3) ||
                 (cp.c.rank === 1 && zoom >= 1.8);
     if (!isHover && !earns) continue;
+
+    ctx.font = '500 10.5px ' + FONT;
     var tx = cp.x + 7, ty = cp.y - 0.5;
     var wpx = ctx.measureText(cp.c.name).width;
     if (tx + wpx > W - 8) { tx = cp.x - 7 - wpx; if (tx < 8) continue; }
-    var box = [tx - 2, ty - 7, wpx + 4, 14];
-    var clash = false;
-    for (var b = 0; b < boxes.length; b++) {
-      var o = boxes[b];
-      if (box[0] < o[0] + o[2] && box[0] + box[2] > o[0] && box[1] < o[1] + o[3] && box[1] + box[3] > o[1]) { clash = true; break; }
-    }
-    if (clash && !isHover) continue;
-    boxes.push(box);
-    labelledCities.push(cp.c);
-    ctx.font = '500 10.5px ' + FONT;
-    ctx.lineWidth = 3.2;
-    ctx.strokeStyle = 'rgba(3,8,18,.72)';
-    ctx.strokeText(cp.c.name, tx, ty);
-    ctx.fillStyle = isHover ? '#ffffff' : 'rgba(233,240,250,.88)';
-    ctx.fillText(cp.c.name, tx, ty);
 
+    /* The name's slot is claimed whether or not names are switched on, so the
+       layout - and therefore which cities show a reading - does not shift when
+       you toggle them. This is the "would have a name if names were on" test. */
+    var box = [tx - 2, ty - 7, wpx + 4, 13];
+    if (hits(boxes, box) && !isHover) continue;
+    labelledCities.push(cp.c);
+
+    /* Measured before the name books its space, so a city's own label never
+       blocks its own reading - a neighbour's, or a bigger city's, still does. */
+    var line = null, wbox = null, lx = 0, ly = 0;
     if (opt.wx) {
       var wx = wxNear[wxKeyOf(cp.c)];
       if (wx && !wx.pending && wx.temp !== null && wx.temp !== undefined) {
-        var glyph = (WMO[wx.code] || ['', ''])[0];
-        var line = glyph + ' ' + tempTxt(wx.temp, true);
+        var txt = (WMO[wx.code] || ['', ''])[0] + ' ' + tempTxt(wx.temp, true);
         ctx.font = '500 10px ' + FONT;
-        ctx.lineWidth = 3;
-        ctx.strokeStyle = 'rgba(3,8,18,.75)';
-        ctx.strokeText(line, tx, ty + 11.5);
-        ctx.fillStyle = 'rgba(196,214,238,.92)';
-        ctx.fillText(line, tx, ty + 11.5);
-        boxes.push([tx - 2, ty + 5, ctx.measureText(line).width + 4, 13]);
+        var lw = ctx.measureText(txt).width;
+        /* x, y to draw at, then the box to reserve */
+        var tries = opt.names
+          ? [[tx, ty + 12.5, tx - 2, ty + 6.5],
+             [tx + wpx + 6, ty, tx + wpx + 4, ty - 6],
+             [tx, ty - 12.5, tx - 2, ty - 18.5],
+             [cp.x - 7 - lw, ty + 12.5, cp.x - 9 - lw, ty + 6.5]]
+          : [[tx, ty, tx - 2, ty - 6],
+             [tx, ty + 12.5, tx - 2, ty + 6.5],
+             [cp.x - 7 - lw, ty, cp.x - 9 - lw, ty - 6]];
+        for (var q = 0; q < tries.length; q++) {
+          var t2 = tries[q];
+          if (t2[0] + lw > W - 6) continue;
+          var cand = [t2[2], t2[3], lw + 4, 12];
+          if (hits(boxes, cand)) continue;
+          line = txt; wbox = cand; lx = t2[0]; ly = t2[1];
+          break;
+        }
       }
+    }
+    if (!opt.names && !isHover && !line) continue;
+
+    boxes.push(box);
+    if (wbox) boxes.push(wbox);
+
+    if (opt.names || isHover) {
+      ctx.font = '500 10.5px ' + FONT;
+      ctx.lineWidth = 3.2;
+      ctx.strokeStyle = 'rgba(3,8,18,.72)';
+      ctx.strokeText(cp.c.name, tx, ty);
+      ctx.fillStyle = isHover ? '#ffffff' : 'rgba(233,240,250,.88)';
+      ctx.fillText(cp.c.name, tx, ty);
+    }
+    if (line) {
+      ctx.font = '500 10px ' + FONT;
+      ctx.lineWidth = 3;
+      ctx.strokeStyle = 'rgba(3,8,18,.75)';
+      ctx.strokeText(line, lx, ly);
+      ctx.fillStyle = 'rgba(196,214,238,.92)';
+      ctx.fillText(line, lx, ly);
     }
   }
   if (opt.wx) scheduleWeather();
@@ -1094,6 +1145,8 @@ var labelledCities = [];
 /* How long a reading stands before it is worth asking again. Deliberately
    long: the globe only needs roughly-now weather, and Open-Meteo is free. */
 var WX_TTL = 600000;                       /* 10 minutes a reading stands */
+var WX_MAX = 260;                          /* cities asked about at once */
+var WX_BATCH = 100;                        /* and how many go in one request */
 var WX_MIN_GAP = 30000;                    /* and never two requests inside 30s */
 var wxLastFetch = 0;
 
@@ -1109,11 +1162,18 @@ function scheduleWeather() {
      Wait out the remainder of the gap instead - the newly-arrived cities are
      simply picked up by the next batch. */
   var wait = Math.max(600, WX_MIN_GAP - (Date.now() - wxLastFetch));
-  wxNearTimer = setTimeout(function () { wxNearTimer = null; fetchNearWeather(); }, wait);
+  wxNearTimer = setTimeout(function () {
+    wxNearTimer = null;
+    /* Asking mid-flight fetches whatever happened to be on screen half way
+       through, then the 30s floor holds the rest back. Wait for the globe to
+       settle and the first batch covers the whole view. */
+    if (flying || dragStart) { scheduleWeather(); return; }
+    fetchNearWeather();
+  }, wait);
 }
 function fetchNearWeather() {
   if (!opt.wx) return;
-  var want = labelledCities.slice(0, 60);
+  var want = labelledCities.slice(0, WX_MAX);   /* already in population order */
   var need = want.filter(function (c) {
     var e = wxNear[wxKeyOf(c)];
     return !e || (!e.pending && Date.now() - e.t > WX_TTL);
@@ -1124,22 +1184,28 @@ function fetchNearWeather() {
   wxNearAsked = stamp;
   wxLastFetch = Date.now();
   need.forEach(function (c) { wxNear[wxKeyOf(c)] = { pending: true }; });
-  var url = 'https://api.open-meteo.com/v1/forecast?latitude=' + need.map(function (c) { return c.lat; }).join(',') +
-            '&longitude=' + need.map(function (c) { return c.lon; }).join(',') +
-            '&current=temperature_2m,weather_code&timezone=UTC';
-  fetch(url).then(function (r) { return r.json(); }).then(function (j) {
-    var arr = Array.isArray(j) ? j : [j];
-    need.forEach(function (c, i) {
-      var cur = arr[i] && arr[i].current;
-      wxNear[wxKeyOf(c)] = cur
-        ? { t: Date.now(), temp: cur.temperature_2m, code: cur.weather_code }
-        : { t: Date.now(), temp: null };
+  /* Open-Meteo takes a list of coordinates, so a screenful of cities is one or
+     two requests rather than one per city. */
+  var batches = [], k;
+  for (k = 0; k < need.length; k += WX_BATCH) batches.push(need.slice(k, k + WX_BATCH));
+  var left = batches.length;
+  batches.forEach(function (batch) {
+    var url = 'https://api.open-meteo.com/v1/forecast?latitude=' + batch.map(function (c) { return c.lat; }).join(',') +
+              '&longitude=' + batch.map(function (c) { return c.lon; }).join(',') +
+              '&current=temperature_2m,weather_code&timezone=UTC';
+    fetch(url).then(function (r) { return r.json(); }).then(function (j) {
+      var arr = Array.isArray(j) ? j : [j];
+      batch.forEach(function (c, i) {
+        var cur = arr[i] && arr[i].current;
+        wxNear[wxKeyOf(c)] = cur
+          ? { t: Date.now(), temp: cur.temperature_2m, code: cur.weather_code }
+          : { t: Date.now(), temp: null };
+      });
+    }).catch(function () {
+      batch.forEach(function (c) { wxNear[wxKeyOf(c)] = { t: Date.now() - (WX_TTL - 60000), temp: null }; });
+    }).then(function () {
+      if (--left === 0) { wxNearAsked = ''; draw(); }
     });
-    wxNearAsked = '';
-    draw();
-  }).catch(function () {
-    need.forEach(function (c) { wxNear[wxKeyOf(c)] = { t: Date.now() - (WX_TTL - 60000), temp: null }; });
-    wxNearAsked = '';
   });
 }
 
