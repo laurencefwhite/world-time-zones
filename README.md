@@ -7,9 +7,9 @@ local time anywhere on Earth.
 
 ## What it does
 
-- **A rotating globe** with the 392 IANA time zones drawn as real boundaries, not rectangles —
-  so the awkward ones (Kiribati, the Chatham Islands, the western tip of China) are where they
-  actually are.
+- **A rotating globe** with all 444 IANA time zones drawn as real boundaries, not rectangles — 418
+  on land, plus the 26 nautical zones that cover the oceans — so the awkward ones (Kiribati, the
+  Chatham Islands, the western tip of China) are where they actually are.
 - **Local time and UTC** side by side, with the date, updating continuously.
 - **Sunlight shading**, stepped at each twilight threshold — the sun 0°, 6°, 12° and 18° below the
   horizon, which is to say sunset, then civil, nautical and astronomical twilight. Cities are marked
