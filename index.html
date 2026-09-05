@@ -720,6 +720,23 @@ function abbrFor(tz, d) {
   if (m !== null && m > e[0] && e[2]) return e[2];
   return e[1] || '';
 }
+/* "Australian Eastern Standard Time" rather than "AEST". Unlike the short
+   codes, which the browser only knows for its own region, the long names come
+   from CLDR and read the same wherever the viewer is - and they follow daylight
+   saving, so this says Summer Time when it is summer. */
+function zoneLongName(tzid, d) {
+  if (!tzid || tzid.indexOf('Etc/') === 0) return '';
+  try {
+    var parts = fmt(tzid, { timeZoneName: 'long' }, 'L').formatToParts(d);
+    for (var i = 0; i < parts.length; i++) {
+      if (parts[i].type === 'timeZoneName') {
+        var v = parts[i].value;
+        return /^(GMT|UTC)/.test(v) ? '' : v;     /* a bare offset tells us nothing new */
+      }
+    }
+  } catch (e) {}
+  return '';
+}
 function offsetLabel(z) {
   if (z === 0) return '0';
   var s = z < 0 ? '−' : '+';
@@ -1112,14 +1129,21 @@ function drawCities(sun, r) {
         ctx.font = '500 10px ' + FONT;
         var lw = ctx.measureText(txt).width;
         /* x, y to draw at, then the box to reserve */
+        /* With the markers switched off there is no dot to sit beside, so the
+           reading takes the city's own place rather than hanging to its right. */
+        var cx0 = cp.x - lw / 2;
         var tries = wantName
           ? [[tx, ty + 12.5, tx - 2, ty + 6.5],
              [tx + wpx + 6, ty, tx + wpx + 4, ty - 6],
              [tx, ty - 12.5, tx - 2, ty - 18.5],
              [cp.x - 7 - lw, ty + 12.5, cp.x - 9 - lw, ty + 6.5]]
-          : [[tx, ty, tx - 2, ty - 6],
-             [tx, ty + 12.5, tx - 2, ty + 6.5],
-             [cp.x - 7 - lw, ty, cp.x - 9 - lw, ty - 6]];
+          : opt.cities
+            ? [[tx, ty, tx - 2, ty - 6],
+               [tx, ty + 12.5, tx - 2, ty + 6.5],
+               [cp.x - 7 - lw, ty, cp.x - 9 - lw, ty - 6]]
+            : [[cx0, cp.y, cx0 - 2, cp.y - 6],
+               [cx0, cp.y + 13, cx0 - 2, cp.y + 7],
+               [cx0, cp.y - 13, cx0 - 2, cp.y - 19]];
         for (var qp = 0; qp < 2 && !line; qp++) {
           for (var q = 0; q < tries.length; q++) {
             var t2 = tries[q];
@@ -1429,7 +1453,8 @@ function showCityTip(cp, mx, my, force) {
     '<div class="td">' + dateIn(d, c.tz) + ' &middot; ' + offsetIn(d, c.tz) +
       (abbrFor(c.tz, d) ? ' &middot; ' + abbrFor(c.tz, d) : '') + '</div>' +
     '<div class="tw" id="wx">' + wxHtml + '</div>' +
-    '<div class="tzline">' + esc(c.tz.replace(/_/g, ' ')) + ' &middot; ' + badge + '</div>';
+    (zoneLongName(c.tz, d) ? '<div class="tzline">' + esc(zoneLongName(c.tz, d)) + '</div>' : '') +
+    '<div class="tzline" style="opacity:.75">' + esc(c.tz.replace(/_/g, ' ')) + ' &middot; ' + badge + '</div>';
   tip.classList.add('on');
   placeTip(mx, my);
 
@@ -1469,7 +1494,9 @@ function showZoneTip(f, country, mx, my) {
     '<div class="tc">' + offsetIn(d, tzid) + (code ? ' &middot; ' + code : '') + '</div>' +
     '<div class="tt">' + timeIn(d, tzid) + '</div>' +
     '<div class="td">' + dateIn(d, tzid) + '</div>' +
-    '<div class="tzline">' + (isEtc ? 'Nautical time zone' : esc(tzid.replace(/_/g, ' '))) + '</div>';
+    (zoneLongName(tzid, d) ? '<div class="tzline">' + esc(zoneLongName(tzid, d)) + '</div>' : '') +
+    '<div class="tzline" style="opacity:.75">' +
+      (isEtc ? 'Nautical time zone' : esc(tzid.replace(/_/g, ' '))) + '</div>';
   tip.classList.add('on');
   placeTip(mx, my);
 }
@@ -1880,7 +1907,7 @@ playDateBtn.addEventListener('click', function () { setPlaying('calendar'); });
 function buildLegend() {
   var ramp = document.getElementById('ramp'), ticks = document.getElementById('ticks');
   document.getElementById('legend-title').textContent =
-    opt.dst ? 'Offset from UTC, right now' : 'Standard offset from UTC';
+    opt.dst ? 'Offset from UTC' : 'Standard offset from UTC';
   document.getElementById('legend-note').innerHTML = opt.dst
     ? 'Colours, offsets and codes follow daylight saving as it stands at the moment shown. Two places of the same colour keep the same clock.'
     : 'Colours show each zone&rsquo;s <em>standard</em> offset, with daylight saving set aside. City clocks always use the real rules.';
