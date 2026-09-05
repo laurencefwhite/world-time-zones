@@ -881,8 +881,10 @@ function draw() {
   ctx.lineWidth = 1; ctx.strokeStyle = PALETTE.rim; ctx.stroke();
 
   zoneBoxes = [];
+  zoneItems = [];
   if ((opt.labels || opt.codes || opt.times) && !fast) drawZoneLabels(date);
   if (opt.cities || opt.wx) drawCities(sun, r); else cityPts = [];
+  paintZoneLabels();
 }
 
 function hits(boxes, box) {
@@ -897,8 +899,11 @@ function hits(boxes, box) {
 /* What the zone text has claimed this frame. City names, markers and readings
    are laid out afterwards and treat these as taken, so the zone's own clock,
    offset and code always win the space they want. */
-var zoneBoxes = [];
+var zoneBoxes = [], zoneItems = [];
 
+/* Lays the zone text out and books its space, but does not draw: the painting
+   happens after the cities, so a clock sits over a city name rather than under
+   it, and at seventy per cent the name reads through from behind. */
 function drawZoneLabels(date) {
   var centre = [-rotation[0], -rotation[1]];
   var minArea = 0.024 / Math.max(1, zoom * zoom * 0.55);
@@ -908,8 +913,6 @@ function drawZoneLabels(date) {
   var small = '600 10.5px ' + FONT;
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
-  /* Held back from full strength so a marker or a name underneath still reads. */
-  ctx.globalAlpha = 0.7;
   function stamp(t, x, y, font, colour) {
     ctx.font = font;
     ctx.lineWidth = 3;
@@ -962,13 +965,30 @@ function drawZoneLabels(date) {
         totalH += stack[si][3];
         maxW = Math.max(maxW, stack[si][0].length * stack[si][4] * 0.6);
       }
-      var yy = p[1] - totalH / 2;
-      for (si = 0; si < stack.length; si++) {
-        yy += stack[si][3] / 2;
-        stamp(stack[si][0], p[0], yy, stack[si][1], stack[si][2]);
-        yy += stack[si][3] / 2;
-      }
+      zoneItems.push({ x: p[0], y: p[1], h: totalH, stack: stack });
       zoneBoxes.push([p[0] - maxW / 2 - 3, p[1] - totalH / 2 - 2, maxW + 6, totalH + 4]);
+    }
+  }
+}
+
+/* Drawn over the cities, held back from full strength so the name underneath
+   still reads through. */
+function paintZoneLabels() {
+  if (!zoneItems.length) return;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.globalAlpha = 0.7;
+  for (var i = 0; i < zoneItems.length; i++) {
+    var it = zoneItems[i], yy = it.y - it.h / 2, si;
+    for (si = 0; si < it.stack.length; si++) {
+      yy += it.stack[si][3] / 2;
+      ctx.font = it.stack[si][1];
+      ctx.lineWidth = 3;
+      ctx.strokeStyle = 'rgba(3,8,18,.68)';
+      ctx.strokeText(it.stack[si][0], it.x, yy);
+      ctx.fillStyle = it.stack[si][2];
+      ctx.fillText(it.stack[si][0], it.x, yy);
+      yy += it.stack[si][3] / 2;
     }
   }
   ctx.globalAlpha = 1;
@@ -977,7 +997,10 @@ function drawZoneLabels(date) {
 function drawCities(sun, r) {
   var centre = [-rotation[0], -rotation[1]];
   cityPts = [];
-  var labelMin = (W < 700 ? 1e6 : 5e5) / Math.pow(zoom, 1.6);
+  /* Names thin out fast as you pull back: about forty at the world view,
+     seventy at 1.25x, a hundred at 1.5x, levelling off around 2.5x before the
+     viewport itself starts emptying. */
+  var labelMin = (W < 700 ? 8e6 : 4e6) / Math.pow(zoom, 1.9);
   var boxes = [];
   var i, c, p, dist;
 
@@ -1042,9 +1065,13 @@ function drawCities(sun, r) {
     /* The two layers are independent: a name is earned by size at this zoom,
        a reading belongs to any marker in view. Switching one must never add or
        remove the other. */
-    var earns = cp.c.pop >= labelMin ||
-                (cp.c.rank === 2 && zoom >= 1.3) ||
-                (cp.c.rank === 1 && zoom >= 1.8);
+    /* Capitals carry a floor rather than a zoom gate. The gates let all two
+       hundred national capitals in at 1.3x and all hundred and thirty-six state
+       capitals at 1.8x, two cliffs that were most of what made the density jump
+       between zoom levels. A floor lets them arrive with cities of their own
+       apparent weight, in order, without a step. */
+    var ep = Math.max(cp.c.pop, cp.c.rank === 2 ? 1.4e6 : cp.c.rank === 1 ? 0.7e6 : 0);
+    var earns = ep >= labelMin;
     var eligible = earns || isHover;              /* would carry a name at this zoom */
     if (!eligible) continue;
     var wantName = opt.names || isHover;
