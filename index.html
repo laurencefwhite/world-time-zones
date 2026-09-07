@@ -186,6 +186,10 @@ canvas{position:absolute;inset:0;width:100%;height:100%;display:block;touch-acti
   backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);
 }
 #tip.on{opacity:1}
+#tip.touch.on{pointer-events:none}
+#tip .tgo .btn{pointer-events:auto}
+#tip .tgo{margin-top:9px;display:flex;align-items:center;gap:8px;font-size:10px;color:var(--ink-faint)}
+#tip .tgo .btn{padding:4px 9px;font-size:11px;pointer-events:auto}
 #tip .tn{font-family:var(--serif);font-size:16px;line-height:1.2}
 #tip .tc{font-size:10.5px;color:var(--ink-faint);letter-spacing:.05em;margin-top:1px}
 #tip .tt{font-size:25px;font-variant-numeric:tabular-nums;letter-spacing:-.01em;margin-top:8px;line-height:1}
@@ -1207,7 +1211,9 @@ function countryAt(lonlat) {
   return null;
 }
 function cityAt(mx, my) {
-  var best = null, bd = 15 * 15;
+  /* a fingertip is blunter than a pointer, so the reach around a city grows on a touch screen */
+  var reach = coarsePointer ? 22 : 15;
+  var best = null, bd = reach * reach;
   for (var i = 0; i < cityPts.length; i++) {
     var p = cityPts[i];
     var d = (p.x - mx) * (p.x - mx) + (p.y - my) * (p.y - my);
@@ -1429,6 +1435,12 @@ function placeTip(mx, my) {
   if (x + w > W - 10) x = mx - w - 18;
   if (y < 10) y = my + 20;
   if (y + h > H - 10) y = H - h - 10;
+  if (coarsePointer) {
+    /* a finger covers what it points at, so the card goes above it and out of the way */
+    x = clamp(mx - w / 2, 8, Math.max(8, W - w - 8));
+    y = my - h - 30;
+    if (y < 8) y = Math.min(my + 30, H - h - 8);
+  }
   tip.style.transform = 'translate(' + Math.round(x) + 'px,' + Math.round(y) + 'px)';
 }
 
@@ -1456,6 +1468,7 @@ function showCityTip(cp, mx, my, force) {
     (zoneLongName(c.tz, d) ? '<div class="tzline">' + esc(zoneLongName(c.tz, d)) + '</div>' : '') +
     '<div class="tzline" style="opacity:.75">' + esc(c.tz.replace(/_/g, ' ')) + ' &middot; ' + badge + '</div>';
   tip.classList.add('on');
+  addTipGo(cp);
   placeTip(mx, my);
 
   if (!cached || cached.pending) {
@@ -1469,6 +1482,20 @@ function showCityTip(cp, mx, my, force) {
       });
     }, 180);
   }
+}
+
+/* Without a hover there is no telling a look from a choice, so the card carries the choice. */
+function addTipGo(cp) {
+  tip.classList.toggle('touch', coarsePointer);
+  if (!coarsePointer || !cp) return;
+  var el = document.createElement('div');
+  el.className = 'tgo';
+  el.innerHTML = '<button class="btn" id="tipgo">Fly to</button><span>or tap again to fly there</span>';
+  tip.appendChild(el);
+  el.querySelector('#tipgo').addEventListener('click', function (ev) {
+    ev.stopPropagation();
+    flyTo(cp.c.lon, cp.c.lat);
+  });
 }
 
 function weatherHtml(d) {
@@ -1567,7 +1594,8 @@ cv.addEventListener('pointermove', function (e) {
   if (dragStart && ids.length === 1) {
     var k = 57.29578 / (R0 * zoom) * 1.0;
     var dx = e.clientX - dragStart.x, dy = e.clientY - dragStart.y;
-    if (Math.abs(dx) + Math.abs(dy) > 3) moved = true;
+    if (!moved && Math.abs(dx) + Math.abs(dy) <= 3) return;
+    moved = true;
     rotation = [
       dragStart.rot[0] + dx * k * 1.35,
       clamp(dragStart.rot[1] - dy * k * 1.35, -90, 90),
@@ -1598,8 +1626,28 @@ cv.addEventListener('pointerup', function (e) {
   endPointer(e);
   if (wasMoved) { if (stale) spinV = [0, 0]; else startMomentum(); return; }
   spinV = [0, 0];
-  if (e.pointerType === 'touch') { interacting = false; draw(); doHover(e.clientX, e.clientY); return; }
-  var cp = cityAt(e.clientX, e.clientY);
+  if (smallScreen() && document.querySelector('.panel:not(.min)')) { foldPanels(null); return; }
+  var cp = opt.cities ? cityAt(e.clientX, e.clientY) : null;
+  if (e.pointerType === 'touch') {
+    /* A touch screen has no hover, so one tap does the looking and a second does the going:
+       tap a city for its clock and its weather, tap it again to fly there. */
+    interacting = false;
+    if (cp) {
+      var same = hoverCity && hoverCity.c === cp.c && tip.classList.contains('on');
+      if (same) { flyTo(cp.c.lon, cp.c.lat); return; }
+      /* hold the globe still while a city is being read, or the second tap would land elsewhere */
+      hoverCity = cp; hoverZone = null; spinPaused = true;
+      draw(); showCityTip(cp, e.clientX, e.clientY, true);
+      return;
+    }
+    if (hoverCity || tip.classList.contains('on')) {     /* a tap away from it puts the city down again */
+      hoverCity = null; hoverZone = null; hideTip(); spinPaused = false; draw();
+      return;
+    }
+    draw(); doHover(e.clientX, e.clientY);      /* a tap on a zone still names it */
+    if (Math.hypot(e.clientX - CX, e.clientY - CY) > R0 * zoom && opt.spin) spinPaused = !spinPaused;
+    return;
+  }
   if (cp) { flyTo(cp.c.lon, cp.c.lat); return; }
   /* A click on empty globe pauses the spin, and clicking again restarts it.
      Only when the spin layer is on, and only for a click that was not a drag -
@@ -1607,7 +1655,11 @@ cv.addEventListener('pointerup', function (e) {
   if (opt.spin) { spinPaused = !spinPaused; hideTip(); }
 });
 cv.addEventListener('pointercancel', endPointer);
-cv.addEventListener('pointerleave', function (e) { endPointer(e); hideTip(); hoverCity = null; });
+cv.addEventListener('pointerleave', function (e) {
+  endPointer(e);
+  if (e.pointerType === 'touch') return;   /* a tap fires pointerleave at once, which would snatch the card away */
+  hideTip(); hoverCity = null;
+});
 
 cv.addEventListener('wheel', function (e) {
   e.preventDefault();
@@ -1624,6 +1676,7 @@ cv.addEventListener('dblclick', function (e) {
 
 function clamp(v, a, b) { return v < a ? a : v > b ? b : v; }
 
+var coarsePointer = !!(window.matchMedia && window.matchMedia('(pointer: coarse)').matches);
 var hoverRaf = null, lastHover = [0, 0];
 function hover(mx, my) {
   lastHover = [mx, my];
@@ -2029,20 +2082,36 @@ function fadeHint() {
 setTimeout(fadeHint, 9000);
 
 /* ------------------------------------------- panels fold away into corners */
+/* On a phone (narrow, short, or touch-first) the panels start folded into the corners, only one
+   opens at a time, and a tap on the globe folds it again, so the map is never buried. */
+function smallScreen() {
+  return window.innerWidth <= 860 || window.innerHeight <= 520 ||
+         (coarsePointer && Math.min(window.innerWidth, window.innerHeight) <= 900);
+}
+function foldPanels(except) {
+  document.querySelectorAll('.panel').forEach(function (p) {
+    if (p !== except && !p.classList.contains('min')) {
+      p.classList.add('min');
+      var b = p.querySelector('.pmin');
+      if (b) b.title = 'Restore';
+    }
+  });
+}
 (function panels() {
-  var narrow = window.innerWidth <= 860;
+  var small = smallScreen();
   var list = document.querySelectorAll('.panel');
   for (var i = 0; i < list.length; i++) {
     var panel = list[i], btn = panel.querySelector('.pmin');
     if (!btn) continue;
     /* On a phone there is not room for four open panels and a globe, so they
        start folded; on anything wider they start open. */
-    if (narrow) panel.classList.add('min');
+    if (small) { panel.classList.add('min'); btn.title = 'Restore'; }
     (function (p, b) {
       b.addEventListener('click', function (e) {
         e.stopPropagation();
         var min = p.classList.toggle('min');
         b.title = min ? 'Restore' : 'Minimise';
+        if (!min && smallScreen()) foldPanels(p);
         if (p.id === 'scrubber') { timeSlider.paint(); dateSlider.paint(); }
       });
     })(panel, btn);

@@ -22,6 +22,12 @@ local time anywhere on Earth.
   or Fahrenheit.
 - **A slow spin**, on by default. **Click the globe to stop it, and click again to start it** — a
   drag still spins it by hand, and clicking a city still flies to that city.
+- **On a touch screen**, where there is no hovering, one tap does the looking and a second does the
+  going: tap a city for its clock and its weather, tap it again (or use the card's *Fly to* button)
+  to fly there, and tap away to put it down. Selecting a city holds the globe still so that the
+  second tap lands on the same place. The card sits above your finger rather than under it, the
+  target around a city is wider, and the panels fold into the corners with only one open at a time,
+  so a tap on the globe clears the way.
 - **Layers you can switch on and off:** time zones, countries, sun and shadow, city markers, city
   names, zone offsets, zone codes, local times, the graticule, daylight saving, weather,
   Fahrenheit, and the spin. City names imply the markers, so switching names on brings the markers
