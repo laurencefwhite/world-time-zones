@@ -1640,12 +1640,21 @@ cv.addEventListener('pointerup', function (e) {
       draw(); showCityTip(cp, e.clientX, e.clientY, true);
       return;
     }
-    if (hoverCity || tip.classList.contains('on')) {     /* a tap away from it puts the city down again */
+    /* One rule for the rest: a tap on the globe reads whatever is there and holds it still, and the
+       next tap puts it down and lets the globe turn again. Only a tap off the globe altogether is
+       left to start and stop the turning, which is what a click does on a pointer. */
+    if (hoverCity || hoverZone || tip.classList.contains('on')) {
       hoverCity = null; hoverZone = null; hideTip(); spinPaused = false; draw();
       return;
     }
-    draw(); doHover(e.clientX, e.clientY);      /* a tap on a zone still names it */
-    if (Math.hypot(e.clientX - CX, e.clientY - CY) > R0 * zoom && opt.spin) spinPaused = !spinPaused;
+    if (Math.hypot(e.clientX - CX, e.clientY - CY) <= R0 * zoom) {
+      spinPaused = true;
+      draw(); doHover(e.clientX, e.clientY);         /* open country and open water both name their zone */
+      if (!hoverZone) spinPaused = false;            /* nothing there to read after all */
+      return;
+    }
+    if (opt.spin) spinPaused = !spinPaused;
+    draw();
     return;
   }
   if (cp) { flyTo(cp.c.lon, cp.c.lat); return; }
@@ -2138,6 +2147,18 @@ updateScrubLabel();
      `flying` or `dragStart` is set, so it idles until the flight lands. */
   if (opt.spin) startSpin();
 })();
+
+
+/* a read-only window on the state, for checking behaviour from outside the page */
+window.WTZ = {
+  rotation: function () { return rotation.slice(); },
+  zoom: function () { return zoom; },
+  spinPaused: function () { return spinPaused; },
+  hoverCity: function () { return hoverCity && hoverCity.c ? hoverCity.c.name : null; },
+  hoverZone: function () { return hoverZone ? hoverZone.tzid : null; },
+  tipOn: function () { return tip.classList.contains('on'); },
+  opt: opt
+};
 
 })();
 </script>
