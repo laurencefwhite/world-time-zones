@@ -202,6 +202,17 @@ canvas{position:absolute;inset:0;width:100%;height:100%;display:block;touch-acti
 #tip .tw .tmp{font-size:14px;color:var(--ink)}
 #tip .tzline{margin-top:7px;font-size:10.5px;color:var(--ink-faint)}
 
+
+/* the pills that come out when the sidebar is folded away */
+.floatbtn{
+  position:absolute;display:none;z-index:4;height:30px;padding:0 13px;border-radius:14px;
+  background:var(--panel);border:1px solid var(--panel-brd);box-shadow:var(--shadow);
+  backdrop-filter:blur(18px) saturate(140%);-webkit-backdrop-filter:blur(18px) saturate(140%);
+  font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--ink-faint);
+}
+.floatbtn:hover{background:rgba(255,255,255,.07);color:var(--ink)}
+.floatbtn.on{background:rgba(142,208,255,.20);border-color:rgba(142,208,255,.45);color:var(--accent)}
+
 #hint{
   position:absolute;left:50%;transform:translateX(-50%);bottom:52px;font-size:11px;color:var(--ink-faint);
   letter-spacing:.05em;pointer-events:none;transition:opacity .8s;text-align:center;
@@ -315,6 +326,8 @@ canvas{position:absolute;inset:0;width:100%;height:100%;display:block;touch-acti
       <button class="btn" id="resetview" title="Recentre and fit the globe">Reset View</button>
     </div>
   </div>
+
+  <button class="btn floatbtn" id="resetfloat" title="Recentre and fit the globe">Reset view</button>
 
   <div class="panel" id="legend">
     <button class="pmin" data-name="Key" title="Minimise"></button>
@@ -577,7 +590,31 @@ var projection = d3.geoOrthographic().clipAngle(90).precision(0.35);
 var path = d3.geoPath(projection, ctx);
 var sphere = { type: 'Sphere' };
 
+/* The pills sit in a row beside the folded Layers pill, running towards the middle of the screen,
+   so they land in the same place relative to it whatever corner the panel happens to fold into. */
+function placePills() {
+  var panel = document.getElementById('controls');
+  var min = panel.classList.contains('min');
+  var list = pillList();
+  list.forEach(function (el) { el.style.display = min ? 'block' : 'none'; });
+  if (!min || !list.length) return;
+  var r = panel.getBoundingClientRect();
+  var leftwards = (r.left + r.width / 2) > window.innerWidth / 2;
+  var edge = leftwards ? r.left : r.right, gap = 8;
+  for (var i = 0; i < list.length; i++) {
+    var el = list[i], w = el.getBoundingClientRect().width;
+    var x = leftwards ? (edge - gap - w) : (edge + gap);
+    if (x < 6 || x + w > window.innerWidth - 6) { el.style.display = 'none'; continue; }
+    el.style.left = Math.round(x) + 'px';
+    el.style.right = 'auto';
+    el.style.top = Math.round(r.top) + 'px';
+    edge = leftwards ? x : x + w;
+  }
+}
+function pillList() { return [document.getElementById('resetfloat')].filter(Boolean); }
+
 function resize() {
+  placePills();
   DPR = Math.min(window.devicePixelRatio || 1, 2);
   W = window.innerWidth; H = window.innerHeight;
   [cv, skyCv].forEach(function (c) {
@@ -1882,6 +1919,7 @@ resetBtn.addEventListener('click', function () {
   stopPlaying(); refreshTime();
 });
 document.getElementById('resetview').addEventListener('click', function () { resetView(); });
+document.getElementById('resetfloat').addEventListener('click', function (e) { e.stopPropagation(); resetView(); });
 
 /* --------------------------------------------------- running time forward */
 var playRaf = null, playLast = 0, playMode = null;   /* 'clock' | 'calendar' */
@@ -2105,6 +2143,7 @@ function foldPanels(except) {
       if (b) b.title = 'Restore';
     }
   });
+  placePills();
 }
 (function panels() {
   var small = smallScreen();
@@ -2122,6 +2161,7 @@ function foldPanels(except) {
         b.title = min ? 'Restore' : 'Minimise';
         if (!min && smallScreen()) foldPanels(p);
         if (p.id === 'scrubber') { timeSlider.paint(); dateSlider.paint(); }
+        placePills();
       });
     })(panel, btn);
   }
@@ -2129,7 +2169,7 @@ function foldPanels(except) {
 
 /* ------------------------------------------------------------------ boot */
 window.addEventListener('resize', resize);
-document.fonts && document.fonts.ready && document.fonts.ready.then(function () { draw(); });
+document.fonts && document.fonts.ready && document.fonts.ready.then(function () { draw(); placePills(); });
 resize();
 tickClocks();
 updateScrubLabel();

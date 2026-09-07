@@ -30,6 +30,8 @@ local time anywhere on Earth.
   click does with a pointer. The card sits above your finger rather than under it, the target around
   a city is wider, and the panels fold into the corners with only one open at a time, so a tap on
   the globe clears the way.
+- **A Reset view pill.** When the layers panel is folded away, Reset view comes out and sits beside
+  the folded pill, so the one control worth having to hand is always there.
 - **Layers you can switch on and off:** time zones, countries, sun and shadow, city markers, city
   names, zone offsets, zone codes, local times, the graticule, daylight saving, weather,
   Fahrenheit, and the spin. City names imply the markers, so switching names on brings the markers
