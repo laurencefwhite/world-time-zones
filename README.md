@@ -64,3 +64,7 @@ The boundary data is derived from OpenStreetMap and carries the
 [Open Database Licence](https://opendatacommons.org/licenses/odbl/), which requires attribution —
 hence the credits shown on the page itself as well as here. Natural Earth is public domain, and the
 IANA database is in the public domain.
+
+## Copyright
+
+Code and page © 2026 Laurence F. White. The data credits above carry their own licences.
