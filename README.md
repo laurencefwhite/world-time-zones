@@ -42,14 +42,33 @@ local time anywhere on Earth.
 
 Open `index.html` in a browser. That is the whole procedure.
 
-It is a single self-contained file — no build step, no server, no dependencies to install. The zone
-boundaries are embedded in the page, which is why it is about a megabyte.
+It is one page plus one script — no build step, no server, no dependencies to install. The zone
+boundaries are embedded in the page, which is why it is about a megabyte; `lib/globe-gl.js` is the WebGL
+drawing engine it shares with the history atlas.
 
 Two things do come from the network, and both fail quietly rather than breaking the page:
 
 - **Fonts** (Inter and Spectral) from Google Fonts.
 - **Weather** from the Open-Meteo API. Offline, or behind a strict content-security policy, the
   weather simply does not appear and everything else works.
+
+## Rendering
+
+The heavy layers – the ocean, the land, the time zones and the coast, border and zone lines – are drawn on
+the graphics card with WebGL 2. The 2D canvas on top keeps night and twilight, highlights, the graticule,
+shading, labels, cities and weather. Where WebGL 2 is missing, or the browser takes the context away, the
+page draws everything in 2D as before; adding `?gl=0` to the address forces that.
+
+Out to zoom 2 the land and the zones are not drawn as shapes at all: at load the page draws them once into
+two flat images of the world, and the graphics card looks up every pixel of the globe in them, colouring each
+zone from a small palette that is refreshed when the minute changes. That is exact at the edge of the globe
+and needs no clipping, which was most of the cost of a frame. Closer in, they are drawn as shapes, and
+anything outside the window is skipped. The lines are uploaded once and cut at the edge of the globe by the
+graphics card.
+
+At the world view a settled frame now takes about 6 ms, against about 130 ms before, and one while dragging
+about 6 ms against about 35 (measured headless on this machine's own graphics card). `WTZ.profile(frames,
+fast)` breaks a frame down by layer.
 
 ## Data and credits
 
